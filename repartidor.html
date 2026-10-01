@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>App Repartidor - Transmisión</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        /* CSS para estructurar la aplicación */
+        body { font-family: Arial, sans-serif; padding: 25px; background-color: #f4f6f9; text-align: center; }
+        .card { max-width: 420px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        input { padding: 12px; width: 100%; margin-bottom: 15px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; font-size: 16px; text-align: center; }
+        button { background-color: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 6px; cursor: pointer; width: 100%; }
+        button:hover { background-color: #218838; }
+        .consola { margin-top: 20px; background: #212529; color: #75b798; padding: 15px; border-radius: 6px; font-family: monospace; text-align: left; font-size: 13px; height: 120px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Panel del Repartidor</h2>
+        <p>Ingresa el código del pedido y presiona transmitir.</p>
+        
+        <!-- Nuevo campo para el código del pedido -->
+        <input type="text" id="codigoPedido" placeholder="Ejemplo: PEDIDO-001">
+        <button onclick="conectarYTransmitir()">Iniciar Transmisión</button>
+        
+        <div class="consola" id="logConsola">Sistema listo...</div>
+    </div>
+
+    <script>
+        const BROKER_URL = "wss://broker.hivemq.com:8884/mqtt";
+        let clienteMqtt = null;
+        let topicoDinamico = ""; // Guardará el canal único
+
+        function registrarMensaje(texto) {
+            const consola = document.getElementById("logConsola");
+            consola.innerHTML += "<br>> " + texto;
+            consola.scrollTop = consola.scrollHeight;
+        }
+
+        function conectarYTransmitir() {
+            // 1. Obtenemos el código que el repartidor escribió
+            const codigo = document.getElementById("codigoPedido").value.trim();
+            
+            if (codigo === "") {
+                alert("Por favor, ingresa un código de pedido válido.");
+                return;
+            }
+
+            // 2. Creamos el canal único usando el código
+            topicoDinamico = "delivery_smart/ubicacion/" + codigo;
+            registrarMensaje("Canal asignado: " + topicoDinamico);
+            registrarMensaje("Conectando con la nube...");
+
+            // 3. Conectamos al servidor de mensajería
+            clienteMqtt = mqtt.connect(BROKER_URL);
+
+            clienteMqtt.on("connect", () => {
+                registrarMensaje("¡Conectado al servidor!");
+                iniciarLecturaGPS();
+            });
+        }
+
+        function iniciarLecturaGPS() {
+            if (!("geolocation" in navigator)) {
+                registrarMensaje("Tu navegador no soporta GPS.");
+                return;
+            }
+
+            registrarMensaje("Buscando señal GPS...");
+
+            navigator.geolocation.watchPosition(
+                (posicion) => {
+                    const datosUbicacion = {
+                        lat: posicion.coords.latitude,
+                        lng: posicion.coords.longitude,
+                        hora: new Date().toLocaleTimeString()
+                    };
+
+                    // 4. Enviamos las coordenadas al canal único
+                    const mensajeTexto = JSON.stringify(datosUbicacion);
+                    clienteMqtt.publish(topicoDinamico, mensajeTexto);
+
+                    registrarMensaje(`Ubicación enviada: Lat ${datosUbicacion.lat.toFixed(4)}, Lng ${datosUbicacion.lng.toFixed(4)}`);
+                },
+                (error) => {
+                    registrarMensaje("Error GPS: Verifica que el GPS esté activo y la página tenga permisos.");
+                },
+                { enableHighAccuracy: true, maximumAge: 0 }
+            );
+        }
+    </script>
+</body>
+</html>

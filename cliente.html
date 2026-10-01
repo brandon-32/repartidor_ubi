@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Seguimiento de Entrega</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f8f9fa; }
+        .contenedor { max-width: 700px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .controles { display: flex; gap: 10px; margin-bottom: 15px; }
+        input { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #0056b3; }
+        #mapa { height: 450px; width: 100%; border-radius: 8px; margin-top: 15px; border: 1px solid #ddd; }
+        .badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; background: #6c757d; color: white; }
+    </style>
+</head>
+<body>
+
+    <div class="contenedor">
+        <h2>Sigue tu pedido en vivo</h2>
+        
+        <!-- Controles para que el cliente ingrese su código -->
+        <div class="controles">
+            <input type="text" id="codigoRastreo" placeholder="Ingresa tu código de pedido (Ej: PEDIDO-001)">
+            <button onclick="buscarPedido()">Buscar</button>
+        </div>
+
+        <span class="badge" id="estadoConexion">Esperando código...</span>
+        <div id="mapa"></div>
+    </div>
+
+    <script>
+        const BROKER_URL = "wss://broker.hivemq.com:8884/mqtt";
+        let mapa, marcadorRepartidor, clienteMqtt;
+        
+        // Inicializamos el mapa vacío al cargar la página
+        mapa = L.map('mapa').setView([-12.0463, -77.0427], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(mapa);
+
+        function buscarPedido() {
+            const codigo = document.getElementById("codigoRastreo").value.trim();
+            if (codigo === "") {
+                alert("Debes ingresar un código para rastrear.");
+                return;
+            }
+
+            const topicoDinamico = "delivery_smart/ubicacion/" + codigo;
+            
+            document.getElementById("estadoConexion").textContent = "Buscando repartidor...";
+            document.getElementById("estadoConexion").style.background = "#ffc107";
+            document.getElementById("estadoConexion").style.color = "#212529";
+
+            // Si ya había una conexión anterior, la cerramos para buscar la nueva
+            if (clienteMqtt) {
+                clienteMqtt.end();
+            }
+
+            // Conectamos al servidor
+            clienteMqtt = mqtt.connect(BROKER_URL);
+
+            clienteMqtt.on("connect", () => {
+                // Nos suscribimos exactamente al mismo canal del código ingresado
+                clienteMqtt.subscribe(topicoDinamico);
+                document.getElementById("estadoConexion").textContent = "Conectado. Esperando movimiento del GPS...";
+            });
+
+            clienteMqtt.on("message", (topico, mensaje) => {
+                const datos = JSON.parse(mensaje.toString());
+
+                document.getElementById("estadoConexion").textContent = `Repartidor en ruta (Actualizado: ${datos.hora})`;
+                document.getElementById("estadoConexion").style.background = "#28a745";
+                document.getElementById("estadoConexion").style.color = "white";
+
+                // Actualizamos el mapa
+                if (!marcadorRepartidor) {
+                    marcadorRepartidor = L.marker([datos.lat, datos.lng]).addTo(mapa);
+                    marcadorRepartidor.bindPopup("<b>Repartidor</b>").openPopup();
+                    mapa.setView([datos.lat, datos.lng], 16);
+                } else {
+                    marcadorRepartidor.setLatLng([datos.lat, datos.lng]);
+                    mapa.panTo([datos.lat, datos.lng]);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
